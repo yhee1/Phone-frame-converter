@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>이미지 프레임 변환기 v13</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: 'Pretendard', sans-serif; text-align: center; margin: 0; padding: 40px; background-color: #f0f2f5; min-height: 100vh; transition: 0.2s; }
+        body.dragover { background-color: #e2e8f0; }
+        #drop-area { border: 3px dashed #cbd5e0; border-radius: 20px; padding: 60px; background: white; cursor: pointer; transition: 0.3s; position: relative; z-index: 10; }
+        #preview-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; margin-top: 30px; }
+        .preview-item { width: 180px; background: white; padding: 10px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .preview-item img { width: 100%; border-radius: 5px; }
+        .btn { padding: 15px 30px; font-size: 18px; font-weight: bold; cursor: pointer; background: #1a202c; color: #fff; border: none; border-radius: 12px; margin-top: 30px; }
+        .btn:disabled { background: #a0aec0; }
+        .info-text { font-size: 14px; color: #718096; margin-top: 15px; }
+    </style>
+</head>
+<body id="body">
+
+    <h1>📱 이미지 프레임 변환기 v13</h1>
+    <div id="drop-area" onclick="document.getElementById('file-input').click()">
+        파일 업로드📤
+        <input type="file" id="file-input" multiple accept="image/*" style="display:none">
+    </div>
+    <p class="info-text">💡 <b>드래그, 파일 선택, Ctrl+V</b> 모두 지원합니다!</p>
+
+    <button id="download-btn" class="btn" disabled>ZIP으로 일괄 다운로드</button>
+    <div id="preview-container"></div>
+
+    <script>
+        const body = document.getElementById('body');
+        const fileInput = document.getElementById('file-input');
+        const previewContainer = document.getElementById('preview-container');
+        const downloadBtn = document.getElementById('download-btn');
+        let convertedFiles = []; 
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(name => body.addEventListener(name, e => { e.preventDefault(); e.stopPropagation(); }));
+        ['dragenter', 'dragover'].forEach(name => body.addEventListener(name, () => body.classList.add('dragover')));
+        ['dragleave', 'drop'].forEach(name => body.addEventListener(name, () => body.classList.remove('dragover')));
+        body.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+        fileInput.addEventListener('change', e => handleFiles(e.target.files));
+        window.addEventListener('paste', e => {
+            const items = e.clipboardData.items;
+            const files = [];
+            for (let item of items) { if (item.type.indexOf('image') !== -1) files.push(item.getAsFile()); }
+            if (files.length > 0) handleFiles(files);
+        });
+
+        async function handleFiles(files) {
+            if (!files || !files.length) return;
+            previewContainer.innerHTML = '✨ 변환 중...';
+            convertedFiles = [];
+            let count = 1;
+            for (let file of files) {
+                const fileName = file.name || `pasted_image_${count++}.png`;
+                const imgData = await processImage(file);
+                convertedFiles.push({ name: fileName, data: imgData });
+                const div = document.createElement('div');
+                div.className = 'preview-item';
+                div.innerHTML = `<img src="${imgData}"><p style="font-size:12px; margin-top:8px; word-break:break-all;">${fileName}</p>`;
+                previewContainer.appendChild(div);
+            }
+            if (previewContainer.firstChild && files.length > 0) previewContainer.firstChild.remove();
+            downloadBtn.disabled = false;
+        }
+
+        function processImage(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+
+                        const H = img.height;
+                        const W = img.width;
+                        const frameWidth = Math.max(12, W * 0.02); 
+                        const topSpace = Math.max(60, H * 0.08);   
+                        const btnW = Math.max(8, W * 0.015);       
+                        
+                        const rightBtnH = H / 7;  
+                        const leftBtnH = H / 8;   
+                        
+                        const frameCornerRadius = Math.max(40, W * 0.1); 
+                        const imgBottomRadius = frameCornerRadius - frameWidth;
+                        const imgTopRadius = 0; 
+
+                        canvas.width = W + (frameWidth * 2) + (btnW * 2);
+                        canvas.height = H + frameWidth + topSpace;
+
+                        // 1. 측면 버튼
+                        ctx.fillStyle = "#1a1a1a";
+                        ctx.roundRect(canvas.width - btnW, canvas.height * 0.28, btnW, rightBtnH, 4); 
+                        ctx.roundRect(0, canvas.height * 0.20, btnW, leftBtnH, 4);  
+                        ctx.roundRect(0, canvas.height * 0.20 + leftBtnH + 20, btnW, leftBtnH, 4);  
+                        ctx.fill();
+
+                        // 2. 본체 테두리 (검정색)
+                        ctx.beginPath();
+                        ctx.roundRect(btnW, 0, canvas.width - (btnW * 2), canvas.height, frameCornerRadius);
+                        ctx.fillStyle = "#000";
+                        ctx.fill();
+
+                        // ⭐ 3. 내부 배경 (흰색) - 상단 테두리를 덮지 않도록 y 좌표 수정
+                        ctx.beginPath();
+                        // y를 frameWidth부터 시작하게 하여 검은색 상단 테두리를 살립니다.
+                        // 대신 상단 곡률은 (frameCornerRadius - frameWidth)를 적용하여 테두리 곡선과 일치시킵니다.
+                        const innerTopRadius = frameCornerRadius - frameWidth;
+                        ctx.roundRect(btnW + frameWidth, frameWidth, W, canvas.height - (frameWidth * 2), [innerTopRadius, innerTopRadius, imgBottomRadius, imgBottomRadius]); 
+                        ctx.fillStyle = "white";
+                        ctx.fill();
+
+                        // 4. 이미지 그리기
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.roundRect(btnW + frameWidth, topSpace, W, H, [imgTopRadius, imgTopRadius, imgBottomRadius, imgBottomRadius]); 
+                        ctx.clip();
+                        ctx.drawImage(img, btnW + frameWidth, topSpace, W, H);
+                        ctx.restore();
+
+                        // 5. 상단 노치 & 아이콘
+                        const iconYCenter = topSpace / 2;
+                        ctx.fillStyle = "black"; 
+                        ctx.beginPath();
+                        ctx.arc(canvas.width / 2, iconYCenter + 5, 15, 0, Math.PI * 2); 
+                        ctx.fill();
+
+                        const batteryHeight = Math.max(12, topSpace * 0.2);
+                        const batteryWidth = batteryHeight * 1.8;
+                        const batteryX = canvas.width - btnW - frameWidth - (W * 0.08);
+                        const batteryY = iconYCenter - (batteryHeight / 2) + 5;
+                        const baselineY = batteryY + batteryHeight;
+
+                        ctx.strokeStyle = "black";
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(batteryX, batteryY, batteryWidth, batteryHeight);
+                        ctx.fillRect(batteryX + batteryWidth, batteryY + (batteryHeight/4), 3, batteryHeight/2);
+                        ctx.fillRect(batteryX + 2, batteryY + 2, batteryWidth * 0.7, batteryHeight - 4); 
+
+                        const barWidth = Math.max(3, W * 0.008);
+                        const barSpacing = barWidth * 0.8;
+                        const heights = [batteryHeight * 0.4, batteryHeight * 0.7, batteryHeight];
+                        const startX = btnW + frameWidth + (W * 0.06);
+
+                        ctx.beginPath();
+                        heights.forEach((h, i) => {
+                            ctx.roundRect(startX + (barWidth + barSpacing) * i, baselineY - h, barWidth, h, 1);
+                        });
+                        ctx.fill();
+
+                        resolve(canvas.toDataURL("image/png"));
+                    };
+                };
+            });
+        }
+
+        downloadBtn.onclick = async () => {
+            const now = new Date();
+            const dateStr = `${String(now.getFullYear()).slice(2)}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+            const zip = new JSZip();
+            convertedFiles.forEach(file => { zip.file(`framed_${file.name}`, file.data.split(',')[1], {base64: true}); });
+            const content = await zip.generateAsync({type: "blob"});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(content);
+            link.download = `스마트폰 프레임 ${dateStr}.zip`;
+            link.click();
+        };
+    </script>
+</body>
+</html>
